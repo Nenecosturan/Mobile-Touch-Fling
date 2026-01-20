@@ -1,11 +1,7 @@
 --[[
-    Universal Mobile Touch-Fling v3.5 (Gyro-Stabilizer Edition)
-    Fixes: Character tripping/falling on activation (Video Fix)
-    Features: 
-    - Active Security Module
-    - Gyro-Stabilizer (Anti-Trip)
-    - Toast Notification
-    
+    Universal Mobile Touch-Fling v4.0 (Tank Physics Edition)
+    Fixes: Walking animation glitch, Self-Fling/Recoil, Gliding
+    Method: High Density Mass + State Overrides
     Author: Nenecosturan / Optimized by Gemini
 ]]
 
@@ -38,25 +34,23 @@ function Security.ProtectGUI(guiObject)
     end
 end
 
-function Security.MaskPhysics(rootPart, humanoid)
+-- Karakteri Normal Haline Döndürme (Temizlik)
+function Security.ResetCharacter(rootPart, humanoid)
     if rootPart then
+        -- Fiziksel özellikleri varsayılana çek (0.7 density standarttır)
+        rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1)
         rootPart.AssemblyAngularVelocity = Vector3.zero
-        rootPart.AssemblyLinearVelocity = Vector3.zero
-        -- Stabilizer'ı temizle
-        for _, obj in pairs(rootPart:GetChildren()) do
-            if obj.Name == "FlingStabilizer" then obj:Destroy() end
-        end
     end
-    -- Karakterin düşme durumunu sıfırla
     if humanoid then
-        humanoid.PlatformStand = false
+        -- Yasaklanan duruşları geri aç
         humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
         humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true) -- Animasyon düzelsin diye geri açıyoruz
     end
 end
 
 -------------------------------------------------------------------------
--- [UI SYSTEM]
+-- [UI SYSTEM] - TOAST NOTIFICATION
 -------------------------------------------------------------------------
 local function ShowToastNotification(message, isError)
     local screenGui = Instance.new("ScreenGui")
@@ -73,7 +67,7 @@ local function ShowToastNotification(message, isError)
     toastFrame.AnchorPoint = Vector2.new(0.5, 1)
     toastFrame.Size = UDim2.new(0, 0, 0, 45)
     toastFrame.ClipsDescendants = true
-
+    
     local uiCorner = Instance.new("UICorner")
     uiCorner.CornerRadius = UDim.new(1, 0)
     uiCorner.Parent = toastFrame
@@ -110,18 +104,16 @@ local function ShowToastNotification(message, isError)
         TweenService:Create(label, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
     end)
 
-    task.delay(3.5, function()
+    task.delay(3, function()
         TweenService:Create(label, TweenInfo.new(0.2), {TextTransparency = 1}):Play()
         local closeTween = TweenService:Create(toastFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {Size = UDim2.new(0, 0, 0, 45), Position = UDim2.new(0.5, 0, 0.9, 0)})
         closeTween:Play()
-        closeTween.Completed:Connect(function()
-            screenGui:Destroy()
-        end)
+        closeTween.Completed:Connect(function() screenGui:Destroy() end)
     end)
 end
 
 -------------------------------------------------------------------------
--- [MAIN SCRIPT]
+-- [MAIN LOGIC] - TANK PHYSICS
 -------------------------------------------------------------------------
 local success, errorMessage = pcall(function()
     
@@ -132,7 +124,7 @@ local success, errorMessage = pcall(function()
         Security.ProtectGUI(screenGui)
 
         local mainFrame = Instance.new("TextButton")
-        mainFrame.Name = "MainControl"
+        mainFrame.Name = "Main"
         mainFrame.Parent = screenGui
         mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
         mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
@@ -165,7 +157,7 @@ local success, errorMessage = pcall(function()
 
     local button, stroke, label, gui = createFlingUI()
 
-    -- DRAG SYSTEM
+    -- DRAG LOGIC (Sürükleme)
     local dragging, dragInput, dragStart, startPos
     local hasMoved = false
 
@@ -181,10 +173,7 @@ local success, errorMessage = pcall(function()
             hasMoved = false
             dragStart = input.Position
             startPos = button.Position
-            
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
+            input.Changed:Connect(function() if input.UserInputState == Enum.UserInputState.End then dragging = false end end)
         end
     end)
 
@@ -192,18 +181,18 @@ local success, errorMessage = pcall(function()
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
     end)
 
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then update(input) end
-    end)
+    UserInputService.InputChanged:Connect(function(input) if input == dragInput and dragging then update(input) end end)
 
     -- FLING LOGIC
     local flingActive = false
-    local rotVelocity = Vector3.new(0, 20000, 0)
+    local rotVelocity = Vector3.new(0, 15000, 0) -- Hız ayarı
 
     local function toggleFling()
         if hasMoved then return end
         
         flingActive = not flingActive
+        
+        local char = LocalPlayer.Character
         
         if flingActive then
             TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(0, 255, 100)}):Play()
@@ -214,8 +203,9 @@ local success, errorMessage = pcall(function()
             label.Text = "FLING: OFF"
             label.TextColor3 = Color3.fromRGB(200, 200, 200)
             
-            if LocalPlayer.Character then
-                Security.MaskPhysics(LocalPlayer.Character:FindFirstChild("HumanoidRootPart"), LocalPlayer.Character:FindFirstChild("Humanoid"))
+            -- Kapatıldığında her şeyi normale döndür
+            if char then
+                Security.ResetCharacter(char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid"))
             end
         end
     end
@@ -230,25 +220,24 @@ local success, errorMessage = pcall(function()
         if not rootPart or not humanoid then return end
 
         if flingActive then
-            -- [FIX 1] Disable Tripping/Falling States
+            -- [FIX 1: ANIMASYON] Freefall modunu kapat ki kollar havaya kalkmasın
             humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
             humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
-            humanoid.PlatformStand = false -- Yerde sürünmeyi engeller
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false) -- Bu "uçuyor" animasyonunu engeller
 
-            -- [FIX 2] Gyro-Stabilizer (Dengeleyici)
-            -- Karakteri zorla dik tutar
-            if not rootPart:FindFirstChild("FlingStabilizer") then
-                local bg = Instance.new("BodyGyro")
-                bg.Name = "FlingStabilizer"
-                bg.P = 9e4
-                bg.MaxTorque = Vector3.new(math.huge, 0, math.huge) -- Y ekseni (dönme) serbest, X ve Z (devrilme) kilitli
-                bg.CFrame = CFrame.new() -- Dik duruş
-                bg.Parent = rootPart
+            -- [FIX 2: TANK FİZİĞİ] Kendi kütleni maksimum yap (Geri tepmemek için)
+            -- Density 100 (Max) = Sen bir tanksın. Çarptığın uçar, sen kımıldamazsın.
+            local currentProps = rootPart.CustomPhysicalProperties
+            if not currentProps or currentProps.Density < 90 then
+                rootPart.CustomPhysicalProperties = PhysicalProperties.new(100, 0.3, 0.5, 1, 1)
             end
 
-            -- Noclip
+            -- Noclip (Duvarlardan geçme değil, sadece fling için gerekli)
+            -- Sadece RootPart harici kısımların çarpışmasını kapatıyoruz ki takılma.
             for _, part in pairs(character:GetDescendants()) do
-                if part:IsA("BasePart") then part.CanCollide = false end
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then 
+                    part.CanCollide = false 
+                end
             end
 
             local targetFound = false
@@ -261,29 +250,24 @@ local success, errorMessage = pcall(function()
                     
                     if distance < 6 then
                         targetFound = true
+                        -- Sadece dönme gücü veriyoruz. Hareket hızını (LinearVelocity) SIFIRLAMIYORUZ.
+                        -- Böylece yürüme animasyonun bozulmaz.
                         rootPart.AssemblyAngularVelocity = rotVelocity
-                        rootPart.AssemblyLinearVelocity = Vector3.zero
-                        
-                        -- Stabilizasyon: Sadece bakış açısını rakibe kilitle, devrilmeyi Gyro halledecek
-                        rootPart.CFrame = CFrame.new(rootPart.Position, Vector3.new(targetRoot.Position.X, rootPart.Position.Y, targetRoot.Position.Z))
                     end
                 end
             end
 
             if not targetFound then
+                -- Kimse yoksa dönmeyi durdur
                 rootPart.AssemblyAngularVelocity = Vector3.zero
-                rootPart.AssemblyLinearVelocity = Vector3.zero 
             end
         end
     end)
 end)
 
--------------------------------------------------------------------------
--- SONUÇ
--------------------------------------------------------------------------
 if success then
-    ShowToastNotification("System Loaded & Stabilized", false)
+    ShowToastNotification("Tank Fling v4.0 Loaded", false)
 else
-    ShowToastNotification("Error Loading Script", true)
+    ShowToastNotification("Script Failed", true)
     warn(errorMessage)
 end
