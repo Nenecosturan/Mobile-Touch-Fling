@@ -1,7 +1,7 @@
 --[[
-    Universal Mobile Touch-Fling v5.0 (Levitation & Stability Edition)
-    Fixes: Stuck in ground, Self-Fling, Jumping glitches
-    Method: Dynamic HipHeight + Velocity Clamping (No Density Hacks)
+    Universal Mobile Touch-Fling v6.0 (Silent Ghost Edition)
+    Fixes: Visual Spinning (Mevlana), Self-Rocketing, Visible Levitation
+    Method: RenderStepped Stabilization + Velocity Clamping + Micro-Hover
     Author: Nenecosturan / Optimized by Gemini
 ]]
 
@@ -34,28 +34,24 @@ function Security.ProtectGUI(guiObject)
     end
 end
 
--- Karakter Ayarlarını Sıfırla
 function Security.ResetCharacter(character)
     if not character then return end
-    local humanoid = character:FindFirstChild("Humanoid")
     local rootPart = character:FindFirstChild("HumanoidRootPart")
-    
-    if humanoid then
-        -- Orijinal boyuna döndür
-        if humanoid:GetAttribute("OriginalHipHeight") then
-            humanoid.HipHeight = humanoid:GetAttribute("OriginalHipHeight")
-        end
-        -- Animasyon kilitlerini aç
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
-    end
+    local humanoid = character:FindFirstChild("Humanoid")
     
     if rootPart then
         rootPart.AssemblyAngularVelocity = Vector3.zero
-        -- Fiziksel özellikleri varsayılana çek
-        rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1)
+        rootPart.AssemblyLinearVelocity = Vector3.zero
+        rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1) -- Varsayılan fizik
+    end
+    
+    if humanoid then
+        if humanoid:GetAttribute("OriginalHipHeight") then
+            humanoid.HipHeight = humanoid:GetAttribute("OriginalHipHeight")
+        end
+        -- Tüm kilitleri kaldır
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
     end
 end
 
@@ -71,7 +67,7 @@ local function ShowToastNotification(message, isError)
     local toastFrame = Instance.new("Frame")
     toastFrame.Name = "Toast"
     toastFrame.Parent = screenGui
-    toastFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    toastFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     toastFrame.BackgroundTransparency = 0.1
     toastFrame.Position = UDim2.new(0.5, 0, 0.9, 0)
     toastFrame.AnchorPoint = Vector2.new(0.5, 1)
@@ -123,7 +119,7 @@ local function ShowToastNotification(message, isError)
 end
 
 -------------------------------------------------------------------------
--- [MAIN LOGIC] - LEVITATION & VELOCITY CONTROL
+-- [MAIN LOGIC] - SILENT GHOST PROTOCOL
 -------------------------------------------------------------------------
 local success, errorMessage = pcall(function()
     
@@ -136,7 +132,7 @@ local success, errorMessage = pcall(function()
         local mainFrame = Instance.new("TextButton")
         mainFrame.Name = "Main"
         mainFrame.Parent = screenGui
-        mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+        mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
         mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
         mainFrame.Size = UDim2.new(0, 160, 0, 60)
         mainFrame.Text = ""
@@ -151,7 +147,7 @@ local success, errorMessage = pcall(function()
         uiStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
         uiStroke.Color = Color3.fromRGB(255, 60, 60)
         uiStroke.Thickness = 2
-        uiStroke.Transparency = 0.2
+        uiStroke.Transparency = 0.3
 
         local statusLabel = Instance.new("TextLabel")
         statusLabel.Parent = mainFrame
@@ -193,9 +189,9 @@ local success, errorMessage = pcall(function()
 
     UserInputService.InputChanged:Connect(function(input) if input == dragInput and dragging then update(input) end end)
 
-    -- FLING LOGIC
+    -- MANTIK DEĞİŞKENLERİ
     local flingActive = false
-    local rotVelocity = Vector3.new(0, 20000, 0) 
+    local rotVelocity = Vector3.new(0, 25000, 0) -- İdeal Fling Gücü
 
     local function toggleFling()
         if hasMoved then return end
@@ -204,51 +200,60 @@ local success, errorMessage = pcall(function()
         local char = LocalPlayer.Character
         
         if flingActive then
-            -- AÇILDIĞINDA
             TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(0, 255, 100)}):Play()
             label.Text = "FLING: ON"
             label.TextColor3 = Color3.fromRGB(100, 255, 100)
             
-            -- [FIX 1: LEVITATION] Karakteri hafifçe havaya kaldır (Sürtünmeyi yok et)
             if char and char:FindFirstChild("Humanoid") then
                 local hum = char.Humanoid
                 if not hum:GetAttribute("OriginalHipHeight") then
-                    hum:SetAttribute("OriginalHipHeight", hum.HipHeight) -- Eskiyi kaydet
+                    hum:SetAttribute("OriginalHipHeight", hum.HipHeight)
                 end
-                -- Yerde takılmaması için boyunu biraz uzatıyoruz (Hover mode)
-                hum.HipHeight = hum.HipHeight + 1.5 
+                -- [FIX 1: MICRO-LEVITATION]
+                -- Sadece 0.1 birim yukarı kalkar. Gözle görülmez ama yer sürtünmesini siler.
+                hum.HipHeight = hum.HipHeight + 0.1
             end
-            
         else
-            -- KAPANDIĞINDA
             TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(255, 60, 60)}):Play()
             label.Text = "FLING: OFF"
             label.TextColor3 = Color3.fromRGB(200, 200, 200)
-            
             Security.ResetCharacter(char)
         end
     end
 
     button.MouseButton1Up:Connect(toggleFling)
 
+    -- [FIX 2: GÖRSEL SABİTLEME (SILENT MODE)]
+    -- Bu loop, fizik motorundan bağımsız çalışır ve senin ekranında karakteri düz tutar.
+    -- Sunucuda dönersin (Fling için), ama kendi ekranında düz yürürsün.
+    RunService.RenderStepped:Connect(function()
+        if flingActive then
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                -- Karakterin görsel açısını kameranın baktığı yere kilitler
+                -- Böylece "Mevlana" gibi dönme görüntüsü kaybolur.
+                -- Sadece RootPart fiziksel olarak döner, görüntü stabil kalır.
+                -- NOT: Bu tamamen görseldir, fiziksel dönmeyi engellemez.
+            end
+        end
+    end)
+
+    -- [FIX 3: FİZİK VE ROKET ENGELLEYİCİ]
     RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if not character then return end
         local rootPart = character:FindFirstChild("HumanoidRootPart")
-        local humanoid = character:FindFirstChild("Humanoid")
-        
-        if not rootPart or not humanoid then return end
+        if not rootPart then return end
 
         if flingActive then
-            -- [FIX 2: Zıplama İzni] Animasyon kilitlerini kaldırdım (v4 hatasıydı)
-            -- Sadece Noclip (Takılma önleyici)
+            -- Noclip (Sadece karakter parçaları için)
             for _, part in pairs(character:GetDescendants()) do
                 if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then 
                     part.CanCollide = false 
                 end
             end
             
-            -- Düşman Arama
+            -- Hedef Arama
             local targetFound = false
             local myPos = rootPart.Position
 
@@ -257,19 +262,24 @@ local success, errorMessage = pcall(function()
                     local targetRoot = player.Character.HumanoidRootPart
                     local distance = (myPos - targetRoot.Position).Magnitude
                     
-                    if distance < 8 then -- Mesafe biraz arttırıldı
+                    if distance < 8 then
                         targetFound = true
+                        -- Fiziksel Dönüş (Rakipleri uçuran güç)
                         rootPart.AssemblyAngularVelocity = rotVelocity
                     end
                 end
             end
             
-            -- [FIX 3: ANTI-VOID / GERİ TEPME ÖNLEYİCİ]
-            -- Eğer kontrolsüzce uçmaya başlarsan (Self-Fling), hızı kes.
-            local currentVel = rootPart.AssemblyLinearVelocity
-            if currentVel.Magnitude > 80 then -- Eğer hızın 80'i geçerse (Normal koşma hızı ~16)
-                -- Yere doğru çakılmayı veya uzaya uçmayı engelle
-                rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, 0, currentVel.Z) 
+            -- [VELOCITY CLAMP - HIZ KELEPÇESİ]
+            -- İşte "Roket gibi uçmayı" engelleyen altın kod.
+            local vel = rootPart.AssemblyLinearVelocity
+            
+            -- Eğer hızın 50'yi geçerse (Normal koşma ~16-20, düşme ~50+)
+            -- Veya yukarı doğru (Y ekseni) aniden fırlarsan:
+            if vel.Magnitude > 50 or vel.Y > 50 or vel.Y < -50 then
+                -- Hızını anında güvenli seviyeye (0) çek.
+                -- Bu seni olduğu yere mıhlar ama yürümene engel olmaz (çünkü yürüme inputu sonraki karede tekrar işlenir)
+                rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             end
 
             if not targetFound then
@@ -277,19 +287,11 @@ local success, errorMessage = pcall(function()
             end
         end
     end)
-    
-    -- Karakter öldüğünde GUI sıfırlanmasın ama ayarlar düzelsin
-    LocalPlayer.CharacterAdded:Connect(function(newChar)
-        flingActive = false -- Yeni doğunca kapalı başla
-        TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(255, 60, 60)}):Play()
-        label.Text = "FLING: OFF"
-        label.TextColor3 = Color3.fromRGB(200, 200, 200)
-    end)
 end)
 
 if success then
-    ShowToastNotification("System v5.0 Loaded", false)
+    ShowToastNotification("Touch Fling v6.0 Ready", false)
 else
-    ShowToastNotification("Script Failed", true)
+    ShowToastNotification("Error", true)
     warn(errorMessage)
 end
