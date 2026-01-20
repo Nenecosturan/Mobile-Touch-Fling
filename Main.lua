@@ -1,7 +1,7 @@
 --[[
-    Universal Mobile Touch-Fling v4.0 (Tank Physics Edition)
-    Fixes: Walking animation glitch, Self-Fling/Recoil, Gliding
-    Method: High Density Mass + State Overrides
+    Universal Mobile Touch-Fling v5.0 (Levitation & Stability Edition)
+    Fixes: Stuck in ground, Self-Fling, Jumping glitches
+    Method: Dynamic HipHeight + Velocity Clamping (No Density Hacks)
     Author: Nenecosturan / Optimized by Gemini
 ]]
 
@@ -34,23 +34,33 @@ function Security.ProtectGUI(guiObject)
     end
 end
 
--- Karakteri Normal Haline Döndürme (Temizlik)
-function Security.ResetCharacter(rootPart, humanoid)
-    if rootPart then
-        -- Fiziksel özellikleri varsayılana çek (0.7 density standarttır)
-        rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1)
-        rootPart.AssemblyAngularVelocity = Vector3.zero
-    end
+-- Karakter Ayarlarını Sıfırla
+function Security.ResetCharacter(character)
+    if not character then return end
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    
     if humanoid then
-        -- Yasaklanan duruşları geri aç
+        -- Orijinal boyuna döndür
+        if humanoid:GetAttribute("OriginalHipHeight") then
+            humanoid.HipHeight = humanoid:GetAttribute("OriginalHipHeight")
+        end
+        -- Animasyon kilitlerini aç
         humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
         humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true) -- Animasyon düzelsin diye geri açıyoruz
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, true)
+    end
+    
+    if rootPart then
+        rootPart.AssemblyAngularVelocity = Vector3.zero
+        -- Fiziksel özellikleri varsayılana çek
+        rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1)
     end
 end
 
 -------------------------------------------------------------------------
--- [UI SYSTEM] - TOAST NOTIFICATION
+-- [UI SYSTEM]
 -------------------------------------------------------------------------
 local function ShowToastNotification(message, isError)
     local screenGui = Instance.new("ScreenGui")
@@ -113,7 +123,7 @@ local function ShowToastNotification(message, isError)
 end
 
 -------------------------------------------------------------------------
--- [MAIN LOGIC] - TANK PHYSICS
+-- [MAIN LOGIC] - LEVITATION & VELOCITY CONTROL
 -------------------------------------------------------------------------
 local success, errorMessage = pcall(function()
     
@@ -157,7 +167,7 @@ local success, errorMessage = pcall(function()
 
     local button, stroke, label, gui = createFlingUI()
 
-    -- DRAG LOGIC (Sürükleme)
+    -- DRAG LOGIC
     local dragging, dragInput, dragStart, startPos
     local hasMoved = false
 
@@ -185,28 +195,37 @@ local success, errorMessage = pcall(function()
 
     -- FLING LOGIC
     local flingActive = false
-    local rotVelocity = Vector3.new(0, 15000, 0) -- Hız ayarı
+    local rotVelocity = Vector3.new(0, 20000, 0) 
 
     local function toggleFling()
         if hasMoved then return end
         
         flingActive = not flingActive
-        
         local char = LocalPlayer.Character
         
         if flingActive then
+            -- AÇILDIĞINDA
             TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(0, 255, 100)}):Play()
             label.Text = "FLING: ON"
             label.TextColor3 = Color3.fromRGB(100, 255, 100)
+            
+            -- [FIX 1: LEVITATION] Karakteri hafifçe havaya kaldır (Sürtünmeyi yok et)
+            if char and char:FindFirstChild("Humanoid") then
+                local hum = char.Humanoid
+                if not hum:GetAttribute("OriginalHipHeight") then
+                    hum:SetAttribute("OriginalHipHeight", hum.HipHeight) -- Eskiyi kaydet
+                end
+                -- Yerde takılmaması için boyunu biraz uzatıyoruz (Hover mode)
+                hum.HipHeight = hum.HipHeight + 1.5 
+            end
+            
         else
+            -- KAPANDIĞINDA
             TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(255, 60, 60)}):Play()
             label.Text = "FLING: OFF"
             label.TextColor3 = Color3.fromRGB(200, 200, 200)
             
-            -- Kapatıldığında her şeyi normale döndür
-            if char then
-                Security.ResetCharacter(char:FindFirstChild("HumanoidRootPart"), char:FindFirstChild("Humanoid"))
-            end
+            Security.ResetCharacter(char)
         end
     end
 
@@ -217,29 +236,19 @@ local success, errorMessage = pcall(function()
         if not character then return end
         local rootPart = character:FindFirstChild("HumanoidRootPart")
         local humanoid = character:FindFirstChild("Humanoid")
+        
         if not rootPart or not humanoid then return end
 
         if flingActive then
-            -- [FIX 1: ANIMASYON] Freefall modunu kapat ki kollar havaya kalkmasın
-            humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-            humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
-            humanoid:SetStateEnabled(Enum.HumanoidStateType.Freefall, false) -- Bu "uçuyor" animasyonunu engeller
-
-            -- [FIX 2: TANK FİZİĞİ] Kendi kütleni maksimum yap (Geri tepmemek için)
-            -- Density 100 (Max) = Sen bir tanksın. Çarptığın uçar, sen kımıldamazsın.
-            local currentProps = rootPart.CustomPhysicalProperties
-            if not currentProps or currentProps.Density < 90 then
-                rootPart.CustomPhysicalProperties = PhysicalProperties.new(100, 0.3, 0.5, 1, 1)
-            end
-
-            -- Noclip (Duvarlardan geçme değil, sadece fling için gerekli)
-            -- Sadece RootPart harici kısımların çarpışmasını kapatıyoruz ki takılma.
+            -- [FIX 2: Zıplama İzni] Animasyon kilitlerini kaldırdım (v4 hatasıydı)
+            -- Sadece Noclip (Takılma önleyici)
             for _, part in pairs(character:GetDescendants()) do
                 if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then 
                     part.CanCollide = false 
                 end
             end
-
+            
+            -- Düşman Arama
             local targetFound = false
             local myPos = rootPart.Position
 
@@ -248,25 +257,38 @@ local success, errorMessage = pcall(function()
                     local targetRoot = player.Character.HumanoidRootPart
                     local distance = (myPos - targetRoot.Position).Magnitude
                     
-                    if distance < 6 then
+                    if distance < 8 then -- Mesafe biraz arttırıldı
                         targetFound = true
-                        -- Sadece dönme gücü veriyoruz. Hareket hızını (LinearVelocity) SIFIRLAMIYORUZ.
-                        -- Böylece yürüme animasyonun bozulmaz.
                         rootPart.AssemblyAngularVelocity = rotVelocity
                     end
                 end
             end
+            
+            -- [FIX 3: ANTI-VOID / GERİ TEPME ÖNLEYİCİ]
+            -- Eğer kontrolsüzce uçmaya başlarsan (Self-Fling), hızı kes.
+            local currentVel = rootPart.AssemblyLinearVelocity
+            if currentVel.Magnitude > 80 then -- Eğer hızın 80'i geçerse (Normal koşma hızı ~16)
+                -- Yere doğru çakılmayı veya uzaya uçmayı engelle
+                rootPart.AssemblyLinearVelocity = Vector3.new(currentVel.X, 0, currentVel.Z) 
+            end
 
             if not targetFound then
-                -- Kimse yoksa dönmeyi durdur
                 rootPart.AssemblyAngularVelocity = Vector3.zero
             end
         end
     end)
+    
+    -- Karakter öldüğünde GUI sıfırlanmasın ama ayarlar düzelsin
+    LocalPlayer.CharacterAdded:Connect(function(newChar)
+        flingActive = false -- Yeni doğunca kapalı başla
+        TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(255, 60, 60)}):Play()
+        label.Text = "FLING: OFF"
+        label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    end)
 end)
 
 if success then
-    ShowToastNotification("Tank Fling v4.0 Loaded", false)
+    ShowToastNotification("System v5.0 Loaded", false)
 else
     ShowToastNotification("Script Failed", true)
     warn(errorMessage)
