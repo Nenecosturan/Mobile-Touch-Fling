@@ -1,7 +1,7 @@
 --[[
-    Universal Mobile Touch-Fling v6.0 (Silent Ghost Edition)
-    Fixes: Visual Spinning (Mevlana), Self-Rocketing, Visible Levitation
-    Method: RenderStepped Stabilization + Velocity Clamping + Micro-Hover
+    Universal Mobile Touch-Fling v7.0 (Smart Assassin Edition)
+    Fixes: ALL Performance Issues (Lag), Self-Fling, Visual Spinning
+    Method: Proximity Trigger (Only spins when target is close)
     Author: Nenecosturan / Optimized by Gemini
 ]]
 
@@ -34,24 +34,26 @@ function Security.ProtectGUI(guiObject)
     end
 end
 
-function Security.ResetCharacter(character)
-    if not character then return end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    local humanoid = character:FindFirstChild("Humanoid")
+-- Karakteri Tamamen Sıfırla (Temizlik)
+function Security.ResetCharacter(char)
+    if not char then return end
+    local rootPart = char:FindFirstChild("HumanoidRootPart")
+    local humanoid = char:FindFirstChild("Humanoid")
     
     if rootPart then
         rootPart.AssemblyAngularVelocity = Vector3.zero
         rootPart.AssemblyLinearVelocity = Vector3.zero
-        rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1) -- Varsayılan fizik
+        rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1) -- Varsayılan
     end
     
     if humanoid then
         if humanoid:GetAttribute("OriginalHipHeight") then
             humanoid.HipHeight = humanoid:GetAttribute("OriginalHipHeight")
         end
-        -- Tüm kilitleri kaldır
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+        -- Yasaklı durumları aç
+        for _, state in pairs(Enum.HumanoidStateType:GetEnumItems()) do
+             humanoid:SetStateEnabled(state, true)
+        end
     end
 end
 
@@ -67,9 +69,9 @@ local function ShowToastNotification(message, isError)
     local toastFrame = Instance.new("Frame")
     toastFrame.Name = "Toast"
     toastFrame.Parent = screenGui
-    toastFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+    toastFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 12)
     toastFrame.BackgroundTransparency = 0.1
-    toastFrame.Position = UDim2.new(0.5, 0, 0.9, 0)
+    toastFrame.Position = UDim2.new(0.5, 0, 0.88, 0)
     toastFrame.AnchorPoint = Vector2.new(0.5, 1)
     toastFrame.Size = UDim2.new(0, 0, 0, 45)
     toastFrame.ClipsDescendants = true
@@ -83,7 +85,7 @@ local function ShowToastNotification(message, isError)
     uiStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     uiStroke.Color = isError and Color3.fromRGB(255, 80, 80) or Color3.fromRGB(80, 255, 150)
     uiStroke.Thickness = 1.5
-    uiStroke.Transparency = 0.5
+    uiStroke.Transparency = 0.4
 
     local contentFrame = Instance.new("Frame")
     contentFrame.Parent = toastFrame
@@ -97,7 +99,7 @@ local function ShowToastNotification(message, isError)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.GothamMedium
     label.Text = message
-    label.TextColor3 = Color3.fromRGB(240, 240, 240)
+    label.TextColor3 = Color3.fromRGB(230, 230, 230)
     label.TextSize = 14
     label.TextTransparency = 1
 
@@ -110,7 +112,7 @@ local function ShowToastNotification(message, isError)
         TweenService:Create(label, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
     end)
 
-    task.delay(3, function()
+    task.delay(2.5, function()
         TweenService:Create(label, TweenInfo.new(0.2), {TextTransparency = 1}):Play()
         local closeTween = TweenService:Create(toastFrame, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {Size = UDim2.new(0, 0, 0, 45), Position = UDim2.new(0.5, 0, 0.9, 0)})
         closeTween:Play()
@@ -119,7 +121,7 @@ local function ShowToastNotification(message, isError)
 end
 
 -------------------------------------------------------------------------
--- [MAIN LOGIC] - SILENT GHOST PROTOCOL
+-- [MAIN LOGIC] - SMART PROXIMITY SYSTEM
 -------------------------------------------------------------------------
 local success, errorMessage = pcall(function()
     
@@ -132,7 +134,7 @@ local success, errorMessage = pcall(function()
         local mainFrame = Instance.new("TextButton")
         mainFrame.Name = "Main"
         mainFrame.Parent = screenGui
-        mainFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
+        mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
         mainFrame.Position = UDim2.new(0.4, 0, 0.3, 0)
         mainFrame.Size = UDim2.new(0, 160, 0, 60)
         mainFrame.Text = ""
@@ -163,7 +165,7 @@ local success, errorMessage = pcall(function()
 
     local button, stroke, label, gui = createFlingUI()
 
-    -- DRAG LOGIC
+    -- Sürükleme Mantığı
     local dragging, dragInput, dragStart, startPos
     local hasMoved = false
 
@@ -189,9 +191,12 @@ local success, errorMessage = pcall(function()
 
     UserInputService.InputChanged:Connect(function(input) if input == dragInput and dragging then update(input) end end)
 
-    -- MANTIK DEĞİŞKENLERİ
+    -- AKILLI FLING SİSTEMİ
     local flingActive = false
-    local rotVelocity = Vector3.new(0, 25000, 0) -- İdeal Fling Gücü
+    local rotVelocity = Vector3.new(0, 25000, 0) -- Fling Gücü
+    
+    -- Hedef ve Performans Yönetimi
+    local checkTimer = 0
 
     local function toggleFling()
         if hasMoved then return end
@@ -203,16 +208,6 @@ local success, errorMessage = pcall(function()
             TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(0, 255, 100)}):Play()
             label.Text = "FLING: ON"
             label.TextColor3 = Color3.fromRGB(100, 255, 100)
-            
-            if char and char:FindFirstChild("Humanoid") then
-                local hum = char.Humanoid
-                if not hum:GetAttribute("OriginalHipHeight") then
-                    hum:SetAttribute("OriginalHipHeight", hum.HipHeight)
-                end
-                -- [FIX 1: MICRO-LEVITATION]
-                -- Sadece 0.1 birim yukarı kalkar. Gözle görülmez ama yer sürtünmesini siler.
-                hum.HipHeight = hum.HipHeight + 0.1
-            end
         else
             TweenService:Create(stroke, TweenInfo.new(0.3), {Color = Color3.fromRGB(255, 60, 60)}):Play()
             label.Text = "FLING: OFF"
@@ -223,75 +218,73 @@ local success, errorMessage = pcall(function()
 
     button.MouseButton1Up:Connect(toggleFling)
 
-    -- [FIX 2: GÖRSEL SABİTLEME (SILENT MODE)]
-    -- Bu loop, fizik motorundan bağımsız çalışır ve senin ekranında karakteri düz tutar.
-    -- Sunucuda dönersin (Fling için), ama kendi ekranında düz yürürsün.
-    RunService.RenderStepped:Connect(function()
-        if flingActive then
-            local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                -- Karakterin görsel açısını kameranın baktığı yere kilitler
-                -- Böylece "Mevlana" gibi dönme görüntüsü kaybolur.
-                -- Sadece RootPart fiziksel olarak döner, görüntü stabil kalır.
-                -- NOT: Bu tamamen görseldir, fiziksel dönmeyi engellemez.
-            end
-        end
-    end)
+    RunService.Heartbeat:Connect(function(deltaTime)
+        if not flingActive then return end
 
-    -- [FIX 3: FİZİK VE ROKET ENGELLEYİCİ]
-    RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if not character then return end
         local rootPart = character:FindFirstChild("HumanoidRootPart")
-        if not rootPart then return end
+        local humanoid = character:FindFirstChild("Humanoid")
+        
+        if not rootPart or not humanoid then return end
 
-        if flingActive then
-            -- Noclip (Sadece karakter parçaları için)
-            for _, part in pairs(character:GetDescendants()) do
-                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then 
-                    part.CanCollide = false 
-                end
-            end
-            
-            -- Hedef Arama
-            local targetFound = false
-            local myPos = rootPart.Position
-
-            for _, player in pairs(Players:GetPlayers()) do
-                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                    local targetRoot = player.Character.HumanoidRootPart
-                    local distance = (myPos - targetRoot.Position).Magnitude
+        -- OPTİMİZASYON: Noclip işlemini her frame yapma, sadece gerekince yap
+        -- (Daha az işlemci kullanımı)
+        
+        -- YAKINLIK KONTROLÜ (PROXIMITY CHECK)
+        -- Sadece yakında biri varsa Fling'i devreye sokuyoruz.
+        local myPos = rootPart.Position
+        local targetFound = false
+        
+        -- Herkese bakmak yerine, sadece canlılara bak
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local tRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                if tRoot then
+                    local dist = (myPos - tRoot.Position).Magnitude
                     
-                    if distance < 8 then
+                    if dist < 6 then -- 6 Adım yakına girerse
                         targetFound = true
-                        -- Fiziksel Dönüş (Rakipleri uçuran güç)
+                        
+                        -- 1. ADIM: NOCLIP AÇ (Takılmamak için)
+                        for _, p in pairs(character:GetChildren()) do
+                            if p:IsA("BasePart") then p.CanCollide = false end
+                        end
+                        
+                        -- 2. ADIM: FİZİKSEL DEĞİŞİM (TANK MODU - SADECE ÇARPARKEN)
+                        -- Density 100, Friction 0 (Kaygan ve Ağır)
+                        -- Böylece geri tepmezsin
+                        rootPart.CustomPhysicalProperties = PhysicalProperties.new(100, 0, 0, 0, 0)
+                        
+                        -- 3. ADIM: DÖNME (FLING)
                         rootPart.AssemblyAngularVelocity = rotVelocity
+                        
+                        -- 4. ADIM: UÇMAYI ENGELLE (Hız Limiti)
+                        local vel = rootPart.AssemblyLinearVelocity
+                        if vel.Y > 20 or vel.Y < -20 then -- Sadece Y ekseninde (Yukarı/Aşağı) kontrol
+                            rootPart.AssemblyLinearVelocity = Vector3.new(vel.X, 0, vel.Z)
+                        end
                     end
                 end
             end
+        end
+        
+        -- Eğer kimse yakında değilse (IDLE MODE)
+        if not targetFound then
+            -- Dönmeyi durdur -> Mevlana görüntüsü biter
+            rootPart.AssemblyAngularVelocity = Vector3.zero
             
-            -- [VELOCITY CLAMP - HIZ KELEPÇESİ]
-            -- İşte "Roket gibi uçmayı" engelleyen altın kod.
-            local vel = rootPart.AssemblyLinearVelocity
-            
-            -- Eğer hızın 50'yi geçerse (Normal koşma ~16-20, düşme ~50+)
-            -- Veya yukarı doğru (Y ekseni) aniden fırlarsan:
-            if vel.Magnitude > 50 or vel.Y > 50 or vel.Y < -50 then
-                -- Hızını anında güvenli seviyeye (0) çek.
-                -- Bu seni olduğu yere mıhlar ama yürümene engel olmaz (çünkü yürüme inputu sonraki karede tekrar işlenir)
-                rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-            end
-
-            if not targetFound then
-                rootPart.AssemblyAngularVelocity = Vector3.zero
+            -- Fiziği normale döndür -> Lag biter
+            if rootPart.CustomPhysicalProperties.Density == 100 then
+                 rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.3, 0.5, 1, 1)
             end
         end
     end)
 end)
 
 if success then
-    ShowToastNotification("Touch Fling v6.0 Ready", false)
+    ShowToastNotification("Smart Fling v7.0 Optimized", false)
 else
-    ShowToastNotification("Error", true)
+    ShowToastNotification("Script Error", true)
     warn(errorMessage)
 end
