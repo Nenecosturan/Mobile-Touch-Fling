@@ -1,10 +1,10 @@
 --[[
-    Universal Mobile Touch-Fling v3.0 (Security & Performance Edition)
+    Universal Mobile Touch-Fling v3.5 (Gyro-Stabilizer Edition)
+    Fixes: Character tripping/falling on activation (Video Fix)
     Features: 
-    - Active Security Module (Anti-Log, Name Obfuscation)
-    - Draggable UI (Fixed)
-    - Toast Notification System
-    - Anti-Recoil Physics
+    - Active Security Module
+    - Gyro-Stabilizer (Anti-Trip)
+    - Toast Notification
     
     Author: Nenecosturan / Optimized by Gemini
 ]]
@@ -15,49 +15,52 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
-local HttpService = game:GetService("HttpService") -- Rastgele isim üretimi için
+local HttpService = game:GetService("HttpService")
 
 -------------------------------------------------------------------------
--- [SECURITY MODULE] - GÜVENLİK VE GİZLİLİK KATMANI
+-- [SECURITY MODULE]
 -------------------------------------------------------------------------
 local Security = {}
 
--- 1. İsim Gizleme (GUI ismini rastgele yapar ki oyun bulamasın)
 function Security.GenerateRandomName()
     return HttpService:GenerateGUID(false):sub(1, 10)
 end
 
--- 2. Güvenli GUI Alanı (CoreGui varsa oraya, yoksa PlayerGui'ye gizler)
 function Security.ProtectGUI(guiObject)
-    if syn and syn.protect_gui then -- Synapse/Bazı PC executorleri için
+    if syn and syn.protect_gui then
         syn.protect_gui(guiObject)
         guiObject.Parent = CoreGui
-    elseif gethui then -- Modern Mobil Executorler için
+    elseif gethui then
         guiObject.Parent = gethui()
     else
-        pcall(function()
-            guiObject.Parent = CoreGui
-        end)
-        if guiObject.Parent ~= CoreGui then
-            guiObject.Parent = LocalPlayer:WaitForChild("PlayerGui")
-        end
+        pcall(function() guiObject.Parent = CoreGui end)
+        if guiObject.Parent ~= CoreGui then guiObject.Parent = LocalPlayer:WaitForChild("PlayerGui") end
     end
 end
 
--- 3. Fizik Maskeleme (Hile kapalıyken karakteri sunucuya masum gösterir)
-function Security.MaskPhysics(rootPart)
+function Security.MaskPhysics(rootPart, humanoid)
     if rootPart then
         rootPart.AssemblyAngularVelocity = Vector3.zero
         rootPart.AssemblyLinearVelocity = Vector3.zero
+        -- Stabilizer'ı temizle
+        for _, obj in pairs(rootPart:GetChildren()) do
+            if obj.Name == "FlingStabilizer" then obj:Destroy() end
+        end
+    end
+    -- Karakterin düşme durumunu sıfırla
+    if humanoid then
+        humanoid.PlatformStand = false
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+        humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
     end
 end
 
 -------------------------------------------------------------------------
--- [UI SYSTEM] - TOAST BİLDİRİMİ
+-- [UI SYSTEM]
 -------------------------------------------------------------------------
 local function ShowToastNotification(message, isError)
     local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = Security.GenerateRandomName() -- Rastgele İsim
+    screenGui.Name = Security.GenerateRandomName()
     screenGui.IgnoreGuiInset = true
     Security.ProtectGUI(screenGui)
 
@@ -118,13 +121,13 @@ local function ShowToastNotification(message, isError)
 end
 
 -------------------------------------------------------------------------
--- [MAIN SCRIPT] - TOUCH FLING LOGIC
+-- [MAIN SCRIPT]
 -------------------------------------------------------------------------
 local success, errorMessage = pcall(function()
     
     local function createFlingUI()
         local screenGui = Instance.new("ScreenGui")
-        screenGui.Name = Security.GenerateRandomName() -- GÜVENLİK: İsim karıştırma
+        screenGui.Name = Security.GenerateRandomName()
         screenGui.ResetOnSpawn = false
         Security.ProtectGUI(screenGui)
 
@@ -141,11 +144,10 @@ local success, errorMessage = pcall(function()
         uiCorner.CornerRadius = UDim.new(0, 14)
         uiCorner.Parent = mainFrame
 
-        -- Durum Işığı (Stroke)
         local uiStroke = Instance.new("UIStroke")
         uiStroke.Parent = mainFrame
         uiStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        uiStroke.Color = Color3.fromRGB(255, 60, 60) -- Başlangıç Kırmızı
+        uiStroke.Color = Color3.fromRGB(255, 60, 60)
         uiStroke.Thickness = 2
         uiStroke.Transparency = 0.2
 
@@ -163,13 +165,13 @@ local success, errorMessage = pcall(function()
 
     local button, stroke, label, gui = createFlingUI()
 
-    -- SÜRÜKLEME SİSTEMİ
+    -- DRAG SYSTEM
     local dragging, dragInput, dragStart, startPos
     local hasMoved = false
 
     local function update(input)
         local delta = input.Position - dragStart
-        if delta.Magnitude > 2 then hasMoved = true end -- Titremeyi yoksay
+        if delta.Magnitude > 2 then hasMoved = true end
         button.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 
@@ -194,12 +196,12 @@ local success, errorMessage = pcall(function()
         if input == dragInput and dragging then update(input) end
     end)
 
-    -- FLING MANTIĞI
+    -- FLING LOGIC
     local flingActive = false
-    local rotVelocity = Vector3.new(0, 20000, 0) -- Yüksek Fling Gücü
+    local rotVelocity = Vector3.new(0, 20000, 0)
 
     local function toggleFling()
-        if hasMoved then return end -- Sürüklendiyse açma
+        if hasMoved then return end
         
         flingActive = not flingActive
         
@@ -212,26 +214,39 @@ local success, errorMessage = pcall(function()
             label.Text = "FLING: OFF"
             label.TextColor3 = Color3.fromRGB(200, 200, 200)
             
-            -- GÜVENLİK: Kapatıldığında fiziği temizle
-            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-                Security.MaskPhysics(LocalPlayer.Character.HumanoidRootPart)
+            if LocalPlayer.Character then
+                Security.MaskPhysics(LocalPlayer.Character:FindFirstChild("HumanoidRootPart"), LocalPlayer.Character:FindFirstChild("Humanoid"))
             end
         end
     end
 
     button.MouseButton1Up:Connect(toggleFling)
 
-    -- FİZİK DÖNGÜSÜ (HEARTBEAT)
     RunService.Heartbeat:Connect(function()
         local character = LocalPlayer.Character
         if not character then return end
         local rootPart = character:FindFirstChild("HumanoidRootPart")
-        if not rootPart then return end
+        local humanoid = character:FindFirstChild("Humanoid")
+        if not rootPart or not humanoid then return end
 
         if flingActive then
-            -- Aktifken Güvenlik Kontrollerini Geç ve Flingle
-            
-            -- Noclip (Çarpışma kapatma)
+            -- [FIX 1] Disable Tripping/Falling States
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+            humanoid.PlatformStand = false -- Yerde sürünmeyi engeller
+
+            -- [FIX 2] Gyro-Stabilizer (Dengeleyici)
+            -- Karakteri zorla dik tutar
+            if not rootPart:FindFirstChild("FlingStabilizer") then
+                local bg = Instance.new("BodyGyro")
+                bg.Name = "FlingStabilizer"
+                bg.P = 9e4
+                bg.MaxTorque = Vector3.new(math.huge, 0, math.huge) -- Y ekseni (dönme) serbest, X ve Z (devrilme) kilitli
+                bg.CFrame = CFrame.new() -- Dik duruş
+                bg.Parent = rootPart
+            end
+
+            -- Noclip
             for _, part in pairs(character:GetDescendants()) do
                 if part:IsA("BasePart") then part.CanCollide = false end
             end
@@ -244,26 +259,21 @@ local success, errorMessage = pcall(function()
                     local targetRoot = player.Character.HumanoidRootPart
                     local distance = (myPos - targetRoot.Position).Magnitude
                     
-                    if distance < 6 then -- 6 birim mesafe
+                    if distance < 6 then
                         targetFound = true
-                        rootPart.AssemblyAngularVelocity = rotVelocity -- Dönme Hızı (Silahımız)
-                        rootPart.AssemblyLinearVelocity = Vector3.zero -- Geri Tepme Önleyici (Kalkanımız)
+                        rootPart.AssemblyAngularVelocity = rotVelocity
+                        rootPart.AssemblyLinearVelocity = Vector3.zero
                         
-                        -- Stabilizasyon (Dönmeyi kameraya yansıtma)
-                        rootPart.CFrame = CFrame.new(rootPart.Position, targetRoot.Position)
+                        -- Stabilizasyon: Sadece bakış açısını rakibe kilitle, devrilmeyi Gyro halledecek
+                        rootPart.CFrame = CFrame.new(rootPart.Position, Vector3.new(targetRoot.Position.X, rootPart.Position.Y, targetRoot.Position.Z))
                     end
                 end
             end
 
             if not targetFound then
-                 -- Kimse yoksa normal duruyormuş gibi yap
                 rootPart.AssemblyAngularVelocity = Vector3.zero
                 rootPart.AssemblyLinearVelocity = Vector3.zero 
             end
-        else
-            -- GÜVENLİK: Pasifken tamamen temiz dur
-            -- Eğer script başka bir scriptle çakışmıyorsa burayı boş bırakabiliriz 
-            -- ama ekstra güvenlik için hızları sıfırlamak iyidir.
         end
     end)
 end)
@@ -272,8 +282,8 @@ end)
 -- SONUÇ
 -------------------------------------------------------------------------
 if success then
-    ShowToastNotification("Security Module & Script Loaded", false)
+    ShowToastNotification("System Loaded & Stabilized", false)
 else
-    ShowToastNotification("Script Failed", true)
+    ShowToastNotification("Error Loading Script", true)
     warn(errorMessage)
 end
